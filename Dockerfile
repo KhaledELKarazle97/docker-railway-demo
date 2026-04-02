@@ -8,6 +8,8 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY app.js .
 COPY package.json .
+
+
 ENV PORT=3000
 EXPOSE 3000
 USER node
