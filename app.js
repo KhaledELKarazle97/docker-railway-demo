@@ -1,13 +1,32 @@
 import Fastify from 'fastify';
-import axios from 'axios';
 import 'dotenv/config'; 
 
-//this is an api for us to look for obs in our area. The / route will return all endpoints as array
 const app = Fastify({ logger: true });
 
 const LINKUP_API_KEY = process.env.LINKUP_API_KEY;
 const LINKUP_BASE_URL = 'https://api.linkup.so/v1';
-console.log({LINKUP_API_KEY})
+
+// Helper to call Linkup API
+async function linkupPost(body) {
+  const res = await fetch(`${LINKUP_BASE_URL}/search`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${LINKUP_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    const err = new Error(data?.message || 'Linkup API error');
+    err.status = res.status;
+    throw err;
+  }
+
+  return res.json();
+}
+
 app.get('/health', async () => {
   return { status: 'ok', version: '1.2.0' };
 });
@@ -36,16 +55,9 @@ app.post('/api/search', async (request, reply) => {
   }
 
   try {
-    const response = await axios.post(
-      `${LINKUP_BASE_URL}/search`,
-      { q: query.trim(), depth, outputType: 'searchResults' },
-      { headers: { Authorization: `Bearer ${LINKUP_API_KEY}`, 'Content-Type': 'application/json' } }
-    );
-    return response.data;
+    return await linkupPost({ q: query.trim(), depth, outputType: 'searchResults' });
   } catch (err) {
-    const status = err.response?.status || 500;
-    const message = err.response?.data?.message || 'Linkup API error';
-    return reply.status(status).send({ error: message });
+    return reply.status(err.status || 500).send({ error: err.message });
   }
 });
 
@@ -59,12 +71,8 @@ app.get('/api/jobs', async (request, reply) => {
   const searchQuery = `${query.trim()} jobs in ${location}`;
 
   try {
-    const response = await axios.post(
-      `${LINKUP_BASE_URL}/search`,
-      { q: searchQuery, depth: 'standard', outputType: 'searchResults' },
-      { headers: { Authorization: `Bearer ${LINKUP_API_KEY}`, 'Content-Type': 'application/json' } }
-    );
-    const results = response.data.results || [];
+    const data = await linkupPost({ q: searchQuery, depth: 'standard', outputType: 'searchResults' });
+    const results = data.results || [];
     return {
       query: searchQuery,
       count: results.length,
@@ -75,9 +83,7 @@ app.get('/api/jobs', async (request, reply) => {
       })),
     };
   } catch (err) {
-    const status = err.response?.status || 500;
-    const message = err.response?.data?.message || 'Linkup API error';
-    return reply.status(status).send({ error: message });
+    return reply.status(err.status || 500).send({ error: err.message });
   }
 });
 
@@ -89,16 +95,12 @@ app.get('/api/company', async (request, reply) => {
   }
 
   try {
-    const response = await axios.post(
-      `${LINKUP_BASE_URL}/search`,
-      {
-        q: `${name.trim()} company hiring jobs open roles 2024 2025`,
-        depth: 'standard',
-        outputType: 'searchResults',
-      },
-      { headers: { Authorization: `Bearer ${LINKUP_API_KEY}`, 'Content-Type': 'application/json' } }
-    );
-    const results = response.data.results || [];
+    const data = await linkupPost({
+      q: `${name.trim()} company hiring jobs open roles 2024 2025`,
+      depth: 'standard',
+      outputType: 'searchResults',
+    });
+    const results = data.results || [];
     return {
       company: name.trim(),
       count: results.length,
@@ -109,9 +111,7 @@ app.get('/api/company', async (request, reply) => {
       })),
     };
   } catch (err) {
-    const status = err.response?.status || 500;
-    const message = err.response?.data?.message || 'Linkup API error';
-    return reply.status(status).send({ error: message });
+    return reply.status(err.status || 500).send({ error: err.message });
   }
 });
 
@@ -127,4 +127,5 @@ const start = async () => {
 if (process.argv[1] === new URL(import.meta.url).pathname) {
   start();
 }
+
 export { app };

@@ -1,11 +1,9 @@
 // app.test.js
 import { jest } from '@jest/globals';
 
-// Must mock BEFORE importing app
-const mockPost = jest.fn();
-jest.unstable_mockModule('axios', () => ({
-  default: { post: mockPost },
-}));
+// Mock global fetch BEFORE importing app
+const mockFetch = jest.fn();
+global.fetch = mockFetch;
 
 // Dynamic import AFTER mock is set up
 const { app } = await import('./app.js');
@@ -15,12 +13,28 @@ const mockResults = [
   { name: 'Backend Engineer at Atlassian', url: 'https://atlassian.com/jobs/2', content: 'Exciting Jira opportunity.' },
 ];
 
-beforeEach(() => mockPost.mockReset());
+// Helper to mock a successful fetch response
+function mockFetchSuccess(data) {
+  mockFetch.mockResolvedValueOnce({
+    ok: true,
+    json: () => Promise.resolve(data),
+  });
+}
+
+// Helper to mock a failed fetch response
+function mockFetchError(status, message) {
+  mockFetch.mockResolvedValueOnce({
+    ok: false,
+    status,
+    json: () => Promise.resolve({ message }),
+  });
+}
+
+beforeEach(() => mockFetch.mockReset());
 afterAll(() => app.close());
 
 describe('GET /health', () => {
   test('returns status ok', async () => {
-    // Use Fastify's built-in inject instead of supertest
     const res = await app.inject({ method: 'GET', url: '/health' });
     expect(res.statusCode).toBe(200);
     expect(JSON.parse(res.body).status).toBe('ok');
@@ -29,7 +43,7 @@ describe('GET /health', () => {
 
 describe('POST /api/search', () => {
   test('returns results for a valid query', async () => {
-    mockPost.mockResolvedValueOnce({ data: { results: mockResults } });
+    mockFetchSuccess({ results: mockResults });
     const res = await app.inject({
       method: 'POST', url: '/api/search',
       headers: { 'content-type': 'application/json' },
@@ -56,11 +70,22 @@ describe('POST /api/search', () => {
     });
     expect(res.statusCode).toBe(400);
   });
+
+  test('forwards error status from Linkup API', async () => {
+    mockFetchError(429, 'Rate limit exceeded');
+    const res = await app.inject({
+      method: 'POST', url: '/api/search',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ query: 'developer jobs' }),
+    });
+    expect(res.statusCode).toBe(429);
+    expect(JSON.parse(res.body).error).toBe('Rate limit exceeded');
+  });
 });
 
 describe('GET /api/jobs', () => {
   test('returns shaped job results', async () => {
-    mockPost.mockResolvedValueOnce({ data: { results: mockResults } });
+    mockFetchSuccess({ results: mockResults });
     const res = await app.inject({ method: 'GET', url: '/api/jobs?query=software+engineer' });
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
@@ -79,7 +104,7 @@ describe('GET /api/jobs', () => {
 
 describe('GET /api/company', () => {
   test('returns company hiring results', async () => {
-    mockPost.mockResolvedValueOnce({ data: { results: mockResults } });
+    mockFetchSuccess({ results: mockResults });
     const res = await app.inject({ method: 'GET', url: '/api/company?name=Atlassian' });
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
